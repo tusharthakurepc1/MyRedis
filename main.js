@@ -53,59 +53,6 @@ class RESP {
       if (expression.endsWith(this.CR + this.LF)) {
         return expression.charAt(1) === "t" ? true : false;
       }
-    } else if (expression.charAt(0) === "*") {
-      // TODO: need to rewrite the whole array desearializer
-      // array
-      let resultantArray = [];
-      const startedArrayIndex = expression.indexOf(this.CR + this.LF);
-      const expressionTokens = expression
-        .substring(startedArrayIndex + 4)
-        .split(this.CR + this.LF);
-
-      for (let index = 0; index < expressionTokens.length; index += 1) {
-        const token = expressionTokens[index];
-
-        // For nested array element call deserialize itself
-        if (token.charAt(0) === ":" || token.charAt(0) === ",") {
-          resultantArray.push(
-            this.deserialize(
-              this.replaceRespConstants(token + this.CR + this.LF)
-            )
-          );
-        } else if (token.charAt(0) === "$") {
-          const nextToken = expressionTokens[index + 1];
-          resultantArray.push(
-            this.deserialize(
-              this.replaceRespConstants(
-                token + this.CR + this.LF + nextToken + this.CR + this.LF
-              )
-            )
-          );
-          const tokenLength = Number(token.substring(1));
-          if (tokenLength > 0) index += 1;
-        } else if (token.charAt(0) === "+") {
-          resultantArray.push(this.deserialize(token + this.CR + this.LF));
-        } else if (token.charAt(0) === "-") {
-          resultantArray.push(this.deserialize(token + this.CR + this.LF));
-        } else if (token.charAt(0) === "_") {
-          resultantArray.push(this.deserialize(token + this.CR + this.LF));
-        } else if (token.charAt(0) === "#") {
-          resultantArray.push(this.deserialize(token + this.CR + this.LF));
-        } else if (token.charAt(0) === "*") {
-          const nestedArrayLength = Number(token.substring(1));
-          let nestedArrayToken = token + this.CR + this.LF;
-
-          for (let index2 = 1; index2 <= nestedArrayLength; index2 += 1) {
-            nestedArrayToken +=
-              expressionTokens[index + index2] + this.CR + this.LF;
-          }
-
-          resultantArray.push(this.deserialize(nestedArrayToken));
-          index += nestedArrayLength;
-        }
-      }
-
-      return resultantArray;
     } else if (expression.charAt(0) === "%") {
       // map
       const resultantMap = {};
@@ -135,9 +82,52 @@ class RESP {
       }
 
       return resultantMap;
+    } else if (expression.charAt(0) === "*") {
+      // array
+      const expressionTokens = expression.split(this.CRLF);
+      const response = this.deserializeArray(expressionTokens, 0);
+      return response.resultantArray || [];
     }
 
     return "";
+  }
+
+  deserializeArray(expressionTokens, index) {
+    if (index >= expressionTokens.length) {
+      return;
+    }
+    const token = expressionTokens[index];
+
+    if (["+", "-", "_", ":", ",", "#"].includes(token.charAt(0))) {
+      return this.deserialize(this.replaceRespConstants(token + this.CRLF));
+    } else if (["$"].includes(token.charAt(0))) {
+      const nextToken = expressionTokens[index + 1];
+      return {
+        resultantArray: this.deserialize(this.searialize(nextToken)),
+        length: 1,
+      };
+    } else if (token.charAt(0) === "*") {
+      const resultantArray = [];
+      let nestedLength = Number(token.substring(1));
+      let nestedLengthCount = 0;
+
+      for (let i = 1; i <= nestedLength; i++) {
+        const reccSol = this.deserializeArray(expressionTokens, index + i);
+        if (typeof reccSol === "object") {
+          resultantArray.push(reccSol.resultantArray);
+          nestedLength += reccSol.length;
+          i += reccSol.length;
+          nestedLengthCount += reccSol.length;
+        } else {
+          resultantArray.push(reccSol);
+        }
+      }
+
+      return {
+        resultantArray,
+        length: resultantArray.length + nestedLengthCount,
+      };
+    }
   }
 
   searialize(message) {
@@ -183,32 +173,13 @@ class RESP {
 (() => {
   const redis = new RESP();
 
-  const msg = redis.searialize([1, 2, [3, 4, 5, 8, 9, 10, [11]]]);
+  const arr = [1, ["hello", [4, "bluk string"]], [true, 7, [12.5, [9, 10]]]];
+  console.log(JSON.stringify(arr));
+  
+  const msg = redis.searialize(arr);
   console.log(msg);
 
-  console.log(redis.deserialize(redis.replaceRespConstants(msg)));
-
-  // console.log(redis.deserialize("+OK\\r\\n"));
-  // console.log(redis.deserialize("-Error message\\r\\n"));
-  // console.log(redis.deserialize(redis.replaceRespConstants(":1000\r\n")));
-  // console.log(redis.deserialize(redis.replaceRespConstants("$5\r\nhello\r\n")));
-
-  // console.log(
-  //   redis.deserialize(redis.replaceRespConstants(`*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Hello\r\n-World\r\n`))
-  // );
-  // console.log(
-  //   redis.deserialize(
-  //     redis.replaceRespConstants(`*-1\r\n`)
-  //   )
-  // );
-  // console.log(
-  //   redis.deserialize(redis.replaceRespConstants(`,1.23\r\n`))
-  // );
-  // console.log(
-  //   redis.deserialize(
-  //     redis.replaceRespConstants(
-  //       `|1\r\n+key-popularity\r\n%2\r\n$1\r\na\r\n,0.1923\r\n$1\r\nb\r\n,0.0012\r\n`
-  //     )
-  //   )
-  // );
+  console.log(
+    JSON.stringify(redis.deserialize(redis.replaceRespConstants(msg)))
+  );
 })();
