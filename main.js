@@ -1,65 +1,75 @@
+/**
+ * RESP: Redis Serialization Protocol
+ */
 class RESP {
+  // Initialize CRLF protocol terminator
   constructor() {
     (this.CR = "\\r"), (this.LF = "\\n"), (this.SP = " ");
     this.CRLF = this.CR + this.LF;
   }
 
+  /**
+   * Function responsible for expression to value (i.e. decode)
+   */
   deserialize(expression) {
     if (expression.length == 0) {
       return "Invalid Expression";
     }
 
+    // Simple string
     if (expression.charAt(0) === "+") {
-      // Simple string
-      if (expression.endsWith(this.CR + this.LF)) {
-        return expression.substring(
-          1,
-          expression.lastIndexOf(this.CR + this.LF)
-        );
+      if (expression.endsWith(this.CRLF)) {
+        return expression.substring(1, expression.lastIndexOf(this.CRLF));
       }
-    } else if (expression.charAt(0) === "-") {
+    }
+    // Simple error
+    else if (expression.charAt(0) === "-") {
       // Simple error
-      if (expression.endsWith(this.CR + this.LF)) {
-        return expression.substring(
-          1,
-          expression.lastIndexOf(this.CR + this.LF)
-        );
+      if (expression.endsWith(this.CRLF)) {
+        return expression.substring(1, expression.lastIndexOf(this.CRLF));
       }
-    } else if (expression.charAt(0) === ":" || expression.charAt(0) === ",") {
-      // number or doubles
-      if (expression.endsWith(this.CR + this.LF)) {
+    }
+    // Number or Doubles
+    else if (expression.charAt(0) === ":" || expression.charAt(0) === ",") {
+      if (expression.endsWith(this.CRLF)) {
         return expression.charAt(0) === ":"
           ? Number.parseInt(
-              expression.substring(1, expression.lastIndexOf(this.CR + this.LF))
+              expression.substring(1, expression.lastIndexOf(this.CRLF))
             )
           : Number.parseFloat(
-              expression.substring(1, expression.lastIndexOf(this.CR + this.LF))
+              expression.substring(1, expression.lastIndexOf(this.CRLF))
             );
       }
-    } else if (expression.charAt(0) === "$") {
-      // bulk string
-      const expressionToken = expression.substring(1).split(this.CR + this.LF);
+    }
+    // Bulk string
+    else if (expression.charAt(0) === "$") {
+      const expressionToken = expression.substring(1).split(this.CRLF);
       const tokenLength = expressionToken[1].length;
       if (Number(expressionToken[0]) === tokenLength) {
         return String(expressionToken[1]);
       } else if (Number(expressionToken[0]) < 0) {
         return null;
       }
-    } else if (expression.charAt(0) === "_") {
-      if (expression.endsWith(this.CR + this.LF)) {
+    }
+    // Null
+    else if (expression.charAt(0) === "_") {
+      if (expression.endsWith(this.CRLF)) {
         return null;
       }
-    } else if (expression.charAt(0) === "#") {
-      if (expression.endsWith(this.CR + this.LF)) {
+    }
+    // Boolean
+    else if (expression.charAt(0) === "#") {
+      if (expression.endsWith(this.CRLF)) {
         return expression.charAt(1) === "t" ? true : false;
       }
-    } else if (expression.charAt(0) === "%") {
-      // map
+    }
+    // Map
+    else if (expression.charAt(0) === "%") {
       const resultantMap = {};
-      const startedArrayIndex = expression.indexOf(this.CR + this.LF);
+      const startedArrayIndex = expression.indexOf(this.CRLF);
       const expressionToken = expression
         .substring(startedArrayIndex + 4)
-        .split(this.CR + this.LF);
+        .split(this.CRLF);
       let mapLength = Number(expression.substring(1, startedArrayIndex));
 
       for (
@@ -71,10 +81,10 @@ class RESP {
         const nextToken = expressionToken[index + 1];
 
         const key = this.deserialize(
-          this.replaceRespConstants(token + this.CR + this.LF)
+          this.replaceRespConstants(token + this.CRLF)
         );
         const value = this.deserialize(
-          this.replaceRespConstants(nextToken + this.CR + this.LF)
+          this.replaceRespConstants(nextToken + this.CRLF)
         );
 
         resultantMap[key] = value;
@@ -82,8 +92,9 @@ class RESP {
       }
 
       return resultantMap;
-    } else if (expression.charAt(0) === "*") {
-      // array
+    }
+    // Array
+    else if (expression.charAt(0) === "*") {
       const expressionTokens = expression.split(this.CRLF);
       const response = this.deserializeArray(expressionTokens, 0);
       return response.resultantArray || [];
@@ -92,37 +103,52 @@ class RESP {
     return "";
   }
 
+  /**
+   * Recursive solution to deserialize array (i.e. decode)
+   */
   deserializeArray(expressionTokens, index) {
+    // Base case
     if (index >= expressionTokens.length) {
       return;
     }
     const token = expressionTokens[index];
 
+    // Recursive call to base deserialization function (i.e. Base Case)
     if (["+", "-", "_", ":", ",", "#"].includes(token.charAt(0))) {
       return this.deserialize(this.replaceRespConstants(token + this.CRLF));
-    } else if (["$"].includes(token.charAt(0))) {
+    }
+    // Recursive call to handle base deserialization function (i.e Base Case)
+    else if (["$"].includes(token.charAt(0))) {
       const nextToken = expressionTokens[index + 1];
       return {
         resultantArray: this.deserialize(this.searialize(nextToken)),
         length: 1,
       };
-    } else if (token.charAt(0) === "*") {
+    }
+    // Traverse all array element
+    else if (token.charAt(0) === "*") {
       const resultantArray = [];
-      let nestedLength = Number(token.substring(1));
+      let arrayLength = Number(token.substring(1));
+
+      // Length of all the nested element count need to skip while traversal
       let nestedLengthCount = 0;
 
-      for (let i = 1; i <= nestedLength; i++) {
+      for (let i = 1; i <= arrayLength; i++) {
         const reccSol = this.deserializeArray(expressionTokens, index + i);
+        // Recursive solution contain the nested array and having count of all the nested array element
         if (typeof reccSol === "object") {
           resultantArray.push(reccSol.resultantArray);
-          nestedLength += reccSol.length;
+          arrayLength += reccSol.length;
           i += reccSol.length;
           nestedLengthCount += reccSol.length;
-        } else {
+        }
+        // Having the base case solution so directly push
+        else {
           resultantArray.push(reccSol);
         }
       }
 
+      // return in case of nested array element having count of all the nested element count
       return {
         resultantArray,
         length: resultantArray.length + nestedLengthCount,
@@ -130,6 +156,9 @@ class RESP {
     }
   }
 
+  /**
+   * Function responsible for value to expression (i.e. encode)
+   */
   searialize(message) {
     let searializeMsg = "";
 
@@ -162,6 +191,9 @@ class RESP {
     }
   }
 
+  /**
+   * Helper function help to convert the escape sequence to crlf protocol terminator
+   */
   replaceRespConstants(expression) {
     return expression
       .replaceAll("\r", "\\r")
@@ -175,7 +207,7 @@ class RESP {
 
   const arr = [1, ["hello", [4, "bluk string"]], [true, 7, [12.5, [9, 10]]]];
   console.log(JSON.stringify(arr));
-  
+
   const msg = redis.searialize(arr);
   console.log(msg);
 
